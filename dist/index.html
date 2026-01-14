@@ -647,6 +647,101 @@
       margin-bottom: 1rem;
     }
 
+    /* Custom Dialog */
+    .dialog-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+
+    .dialog-overlay.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .dialog {
+      background: var(--card-bg);
+      border-radius: 16px;
+      padding: 1.5rem;
+      max-width: 320px;
+      width: 90%;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+      transform: scale(0.95);
+      transition: transform 0.2s ease;
+    }
+
+    .dialog-overlay.visible .dialog {
+      transform: scale(1);
+    }
+
+    .dialog-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      text-align: center;
+    }
+
+    .dialog-message {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      text-align: center;
+      margin-bottom: 1.25rem;
+      line-height: 1.5;
+    }
+
+    .dialog-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .dialog-btn {
+      padding: 0.75rem 1rem;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .dialog-btn-primary {
+      background: var(--work-color);
+      color: white;
+    }
+
+    .dialog-btn-primary:hover {
+      opacity: 0.9;
+    }
+
+    .dialog-btn-secondary {
+      background: var(--bg-secondary);
+      color: var(--text);
+    }
+
+    .dialog-btn-secondary:hover {
+      background: var(--border);
+    }
+
+    .dialog-btn-destructive {
+      background: #ff3b30;
+      color: white;
+    }
+
+    .dialog-btn-destructive:hover {
+      opacity: 0.9;
+    }
+
     @media (max-width: 640px) {
       .tool-name {
         font-size: 1.1rem;
@@ -890,6 +985,15 @@
     </div>
   </main>
 
+  <!-- Custom Dialog -->
+  <div class="dialog-overlay" id="dialogOverlay">
+    <div class="dialog">
+      <div class="dialog-title" id="dialogTitle">Switch Phase?</div>
+      <div class="dialog-message" id="dialogMessage">Timer is currently running.</div>
+      <div class="dialog-buttons" id="dialogButtons"></div>
+    </div>
+  </div>
+
   <script>
     // State
     let state = {
@@ -916,6 +1020,59 @@
 
     let intervalId = null;
     let audioContext = null;
+    let dialogResolve = null;
+
+    // Dialog functions
+    function showDialog(options) {
+      return new Promise((resolve) => {
+        dialogResolve = resolve;
+
+        document.getElementById('dialogTitle').textContent = options.title;
+        document.getElementById('dialogMessage').textContent = options.message;
+
+        const buttonsContainer = document.getElementById('dialogButtons');
+        buttonsContainer.innerHTML = options.buttons.map((btn, index) => `
+          <button class="dialog-btn ${btn.style || 'dialog-btn-secondary'}" data-index="${index}">
+            ${btn.label}
+          </button>
+        `).join('');
+
+        // Add click handlers
+        buttonsContainer.querySelectorAll('.dialog-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const index = parseInt(btn.dataset.index);
+            hideDialog();
+            resolve(options.buttons[index].value);
+          });
+        });
+
+        document.getElementById('dialogOverlay').classList.add('visible');
+
+        // Focus the first button
+        buttonsContainer.querySelector('.dialog-btn')?.focus();
+      });
+    }
+
+    function hideDialog() {
+      document.getElementById('dialogOverlay').classList.remove('visible');
+      dialogResolve = null;
+    }
+
+    // Close dialog on overlay click
+    document.getElementById('dialogOverlay').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('dialogOverlay')) {
+        hideDialog();
+        if (dialogResolve) dialogResolve(null);
+      }
+    });
+
+    // Close dialog on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.getElementById('dialogOverlay').classList.contains('visible')) {
+        hideDialog();
+        if (dialogResolve) dialogResolve(null);
+      }
+    });
 
     // Initialize
     function init() {
@@ -1047,10 +1204,19 @@
       saveState();
     }
 
-    function skipPhase() {
+    async function skipPhase() {
       if (state.phase === 'work' && state.isRunning) {
         // Don't skip running work sessions easily
-        if (!confirm('Skip current work session? Progress will be lost.')) {
+        const result = await showDialog({
+          title: 'Skip Work Session?',
+          message: 'Your focus time progress will be lost. Are you sure you want to skip?',
+          buttons: [
+            { label: 'Skip to Break', value: 'skip', style: 'dialog-btn-destructive' },
+            { label: 'Keep Working', value: 'cancel', style: 'dialog-btn-secondary' }
+          ]
+        });
+
+        if (result !== 'skip') {
           return;
         }
       }
@@ -1080,9 +1246,19 @@
       saveState();
     }
 
-    function switchPhase(phase) {
+    async function switchPhase(phase) {
       if (state.isRunning) {
-        if (!confirm('Timer is running. Switch phase?')) {
+        const phaseNames = { work: 'Work', shortBreak: 'Short Break', longBreak: 'Long Break' };
+        const result = await showDialog({
+          title: 'Switch Phase?',
+          message: `Your ${phaseNames[state.phase].toLowerCase()} timer is still running. What would you like to do?`,
+          buttons: [
+            { label: `Switch to ${phaseNames[phase]}`, value: 'switch', style: 'dialog-btn-primary' },
+            { label: 'Keep Going', value: 'cancel', style: 'dialog-btn-secondary' }
+          ]
+        });
+
+        if (result !== 'switch') {
           return;
         }
         clearInterval(intervalId);
@@ -1238,7 +1414,13 @@
       if (!state.settings.notificationsEnabled) {
         // Request permission
         if (!('Notification' in window)) {
-          alert('This browser does not support notifications');
+          showDialog({
+            title: 'Notifications Unavailable',
+            message: 'This browser does not support desktop notifications.',
+            buttons: [
+              { label: 'OK', value: 'ok', style: 'dialog-btn-primary' }
+            ]
+          });
           return;
         }
 
